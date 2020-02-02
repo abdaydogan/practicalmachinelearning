@@ -7,26 +7,136 @@ output:
     df_print: paged
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+
+This page presents the solution for Coursera's Practical Machine Learning Course Project. 
+
+
+First load the necessary packages and the datasets, including the training and the testing data. 
+
+```{r}
+library(caret)
+library(ggplot2)
+library(tidyverse)
+training<-read.csv("pml-training.csv")
+testing<-read.csv("pml-testing.csv")
 ```
 
-## R Markdown
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
 
-```{r cars}
-summary(cars)
+Visually examined the data and found out several incidence of NAs in many variables. 
+```{r}
+table(training$classe)
+#head(training)
 ```
 
-## Including Plots
-
-You can also embed plots, for example:
-
-```{r pressure, echo=FALSE}
-plot(pressure)
+Hence decided to limit the analysis to the set of variables with few(or none) NAs. 
+```{r}
+colnames(training)
+#head(training[,c(8:11, 37:49, 60:68, 84:86, 102, 113:124, 140, 151:160)])
+class(training$classe)
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+trainingA: training set without the variables with none or few observations. 
+```{r}
+trainingA<-training[,c(8:11, 37:49, 60:68, 84:86, 102, 113:124, 140, 151:160)]
+```
+
+Partition the data in terms of training and test set (validation set).
+trainingAB: training
+testingAB: validation
+```{r}
+inTrain <- createDataPartition(y=trainingA$classe,p=0.7, list=FALSE)
+trainingAB <- trainingA[inTrain,]
+testingAB<- trainingA[-inTrain,]
+dim(trainingAB)
+dim(testingAB)
+table(trainingAB$classe)
+table(testingAB$classe)
+```
+
+Due to the excessive duration of the processing, I used parallel processing feature. 
+```{r}
+#Parallel processing
+#install.packages("parallel")
+library(parallel)
+#install.packages("doParallel")
+library(doParallel)
+cluster<- makeCluster(detectCores()-1)
+registerDoParallel(cluster)
+```
+Used cross validation with n=5
+```{r}
+fitControl<-trainControl(method="cv", number=5, allowParallel = TRUE)
+```
+
+
+Data reduction: In order to decide which variables matter most overall, wanted to do the analysis on a small random sample of the data (10 percent of the data). I will select the top 10 most important variable for the final analysis. I will apply random forest method.
+```{r}
+############
+inTrain <- createDataPartition(y=trainingAB$classe,p=0.10, list=FALSE)
+trainingABC<-trainingAB[inTrain,]
+#Random Forests
+library(randomForest)
+modFit<-train(classe~., data=trainingABC,method="rf", trControl=fitControl)
+modFit
+getTree(modFit$finalModel, k=2)
+```
+
+Below are the most imortant variables in the Random Forest model. 
+```{r}
+varImp(modFit)
+```
+
+Now I will drop the rest of the variables which are relatively less significant. Hence I will regenerate the training and testing sets based on this data reduction process. 
+```{r}
+colnames(trainingAB)
+significant10 <- cbind(name = rownames(varImp(modFit)[[1]]), value = varImp(modFit)[[1]])
+variables <- as.character(significant10[order(significant10[,2], decreasing = T),][1:10,1])
+variables <- c(variables, "classe")
+trainingAB <- trainingAB[variables]
+testingAB <- testingAB[variables]
+colnames(trainingAB)
+colnames(testingAB)
+```
+
+Now let's check if there is excessive multicollinearity issue among the predictors. 
+```{r}
+head(trainingAB)
+cor(trainingAB[,1:10])
+#install.packages("corrplot")
+library(corrplot)
+corrplot(cor(trainingAB[,1:10]), method="ellipse")
+```
+Since the above graph shows no serious correlation among the predictors I did not exclude any variable. 
+
+Now we can run the final random forest model and then stop the parallel processing as we no longer need to run. 
+```{r}
+modFit<-train(classe~., data=trainingAB,method="rf", trControl=fitControl)
+stopCluster(cluster)
+registerDoSEQ()
+```
+
+
+Here is the model
+```{r}
+modFit
+getTree(modFit$finalModel, k=2)
+modFit$resample
+confusionMatrix.train(modFit)
+```
+
+Here is the predictions.
+```{r}
+pred<-predict(modFit, testingAB)
+testingAB$predRight<-pred==testingAB$classe
+table(pred, testingAB$classe)
+pred<-predict(modFit, testing)
+pred
+#B A B A A E D B A A B C B A E E A B B B
+```
+
+
+
+
+
