@@ -135,8 +135,8 @@ pred<-predict(modFit, testing)
 pred
 #B A B A A E D B A A B C B A E E A B B B
 ```
-
-
+  
+http://abdaydogan.github.io/practicalmachinelearning/index.html
 
 
 
